@@ -1,0 +1,105 @@
+pipeline {
+    agent any
+    environment {
+        PATH = "/opt/maven/bin:$WORKSPACE:$PATH"
+        JOB_NAME = 'project77'
+        // Artifactory details
+        ARTIFACTORY_URL = 'http://3.228.18.150:8082/artifactory'
+        ARTIFACTORY_REPO = 'todayrepo'
+        ARTIFACTORY_CREDENTIALS_ID = 'jfrog_cred'
+        //SonarQube Environment
+        SONAR_HOST_URL = 'http://35.170.196.44:9000'
+        SONAR_PROJECT_KEY = 'back-end-project'  // Replace with your project key
+        SONAR_LOGIN = credentials('sonarqube')  // Credentials to authenticate with SonarQube
+        SONARQUBE_AUTH_TOKEN = credentials('sonar_auth_token')
+    }
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git url: 'https://github.com/jenkins-docs/simple-java-maven-app.git', branch: 'master'
+            }
+        }
+        stage('Build') {
+            steps {
+                sh 'mvn clean install'
+                sh 'mvn -B -DskipTests package'
+                sh 'ls -al target/'
+            }
+        }
+        stage('Test') {
+            steps {
+                sh 'mvn test'
+            }
+            post {
+                always {
+                    junit 'target/surefire-reports/*.xml'
+                }
+            }
+        }
+        //stage('SonarQube Analysis') {
+          //  steps {
+            //    withSonarQubeEnv('SonarQube') {  // 'SonarQube' is the name configured in Jenkins system settings
+              //      sh 'mvn sonar:sonar -Dsonar.projectKey=$SONAR_PROJECT_KEY -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.login=$SONAR_LOGIN'
+                //}
+            //}
+        //}
+        //stage('SonarQube Analysis') {
+          //  steps {
+            //    withSonarQubeEnv('SonarQube') {  // 'SonarQube' is the name configured in Jenkins system settings
+              //     sh 'mvn sonar:sonar -Dsonar.projectKey=$SONAR_PROJECT_KEY -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.login=$SONARQUBE_AUTH_TOKEN'
+            //}
+          //}
+        //}
+        stage('Scan') {
+            steps {
+                withSonarQubeEnv(installationName: 'sonarQube') { 
+                   sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:3.9.0.2155:sonar'
+                   }
+            }
+        }
+        //stage('SonarQube Analysis') {
+          //  steps {
+            //    withSonarQubeEnv('SonarQube') {  // 'SonarQube' is the name configured in Jenkins system settings
+              //     sh '''
+                //      mvn sonar:sonar \
+                  //      -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                    //    -Dsonar.host.url=${SONAR_HOST_URL} \
+                      //  -Dsonar.login=${SONARQUBE_AUTH_TOKEN}
+                   //'''
+                //}
+            //}
+        //}
+
+        stage('Install JFrog CLI') {
+            steps {
+                // Install JFrog CLI to the workspace without moving it
+                sh '''
+                curl -fL https://getcli.jfrog.io | sh
+                chmod +x jfrog
+                '''
+            }
+        }
+        stage('Upload to Artifactory') {
+            steps {
+                // Configure Artifactory with stored credentials
+                withCredentials([usernamePassword(credentialsId: ARTIFACTORY_CREDENTIALS_ID, usernameVariable: 'ARTIFACTORY_USER', passwordVariable: 'ARTIFACTORY_PASSWORD')]) {
+                    sh '''
+                    
+                      jfrog rt config --url $ARTIFACTORY_URL --user $ARTIFACTORY_USER --password $ARTIFACTORY_PASSWORD --interactive=false
+                    '''
+
+                    // Upload the JAR file to Artifactory
+                    sh '''
+                    jfrog rt u target/*.jar $ARTIFACTORY_REPO/$(date +%Y-%m-%d)/ --build-name=$JOB_NAME --build-number=$BUILD_NUMBER
+                    '''
+                }
+            }
+        }
+    }
+    post {
+        always {
+                // Clean workspace after the build
+                 cleanWs()
+        }
+    }
+}
